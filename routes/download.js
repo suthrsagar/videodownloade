@@ -8,64 +8,73 @@ router.get('/info', async (req, res) => {
 
     try {
         console.log(`Fetching info for: ${url}`);
-        if (!ytdl.validateURL(url)) {
-            return res.status(400).json({ message: 'Invalid YouTube URL' });
-        }
 
-        let info;
-        try {
-            info = await ytdl.getInfo(url, {
-                requestOptions: {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': '*/*',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                    }
+        const info = await ytdl.getInfo(url, {
+            requestOptions: {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Connection': 'keep-alive',
+                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
                 }
-            });
-        } catch (ytdlErr) {
-            console.error('YTDL Core failed, using fallback:', ytdlErr.message);
-            // Fallback for metadata if YouTube is blocking
-            return res.json({
-                title: 'Video from Link',
-                thumbnail: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800',
-                formats: [
-                    { format_id: 'best', extension: 'mp4', resolution: '1080p (Best)', type: 'video' },
-                    { format_id: '720p', extension: 'mp4', resolution: '720p', type: 'video' },
-                    { format_id: 'audio', extension: 'mp3', resolution: 'High Quality', type: 'audio' }
-                ],
-                isFallback: true
+            }
+        });
+
+        const formats = info.formats
+            .filter(f => f.hasVideo && f.hasAudio)
+            .map(f => ({
+                format_id: f.itag,
+                extension: f.container || 'mp4',
+                resolution: f.qualityLabel || '360p',
+                type: 'video',
+                url: f.url
+            }));
+
+        // Add audio only option
+        const audioFormat = ytdl.filterFormats(info.formats, 'audioonly')[0];
+        if (audioFormat) {
+            formats.push({
+                format_id: audioFormat.itag,
+                extension: 'mp3',
+                resolution: 'Audio (High)',
+                type: 'audio',
+                url: audioFormat.url
             });
         }
 
-        const title = info.videoDetails.title;
-        const thumbnail = info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url;
-        const formats = [
-            { format_id: 'best', extension: 'mp4', resolution: '1080p (Best)', type: 'video' },
-            { format_id: '720p', extension: 'mp4', resolution: '720p', type: 'video' },
-            { format_id: '480p', extension: 'mp4', resolution: '480p', type: 'video' },
-            { format_id: 'audio', extension: 'mp3', resolution: 'High Quality', type: 'audio' }
-        ];
-
-        res.json({ title, thumbnail, formats });
+        res.json({
+            title: info.videoDetails.title,
+            thumbnail: info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url,
+            formats: formats
+        });
     } catch (err) {
-        console.error('FATAL SERVER ERROR:', err.message);
-        res.status(500).json({ message: 'Internal Server Error', error: err.message });
+        console.error('YouTube Info Error:', err.message);
+        res.status(500).json({ message: 'YouTube is blocking the request or the link is invalid.', error: err.message });
     }
 });
 
 router.get('/stream', async (req, res) => {
-    const { url } = req.query;
+    const { url, itag } = req.query;
     if (!url) return res.status(400).json({ message: 'URL is required' });
 
     try {
-        if (!ytdl.validateURL(url)) {
-            return res.status(400).json({ message: 'Invalid YouTube URL' });
-        }
+        const info = await ytdl.getInfo(url, {
+            requestOptions: {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            }
+        });
 
-        res.header('Content-Type', 'video/mp4');
+        const title = info.videoDetails.title.replace(/[^\x00-\x7F]/g, "") || "video";
+        res.header('Content-Disposition', `attachment; filename="${title}.mp4"`);
+
         ytdl(url, {
-            quality: 'highest',
+            quality: itag || 'highest',
+            filter: format => format.container === 'mp4',
             requestOptions: {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
