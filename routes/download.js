@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 
 router.get('/info', async (req, res) => {
     const { url } = req.query;
@@ -8,9 +8,16 @@ router.get('/info', async (req, res) => {
 
     try {
         console.log(`Fetching real info for: ${url}`);
+        if (!ytdl.validateURL(url)) {
+            console.log('Invalid URL provided');
+            return res.status(400).json({ message: 'Invalid YouTube URL' });
+        }
 
-        let title = 'Downloaded Video';
-        let thumbnail = 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800';
+        const info = await ytdl.getInfo(url);
+        console.log('Video Info Fetched:', info.videoDetails.title);
+
+        let title = info.videoDetails.title;
+        let thumbnail = info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url;
         let formats = [
             { format_id: 'best', extension: 'mp4', resolution: '1080p (Best)', type: 'video' },
             { format_id: '720p', extension: 'mp4', resolution: '720p', type: 'video' },
@@ -18,19 +25,15 @@ router.get('/info', async (req, res) => {
             { format_id: 'audio', extension: 'mp3', resolution: 'High Quality', type: 'audio' }
         ];
 
-        if (ytdl.validateURL(url)) {
-            const info = await ytdl.getInfo(url);
-            title = info.videoDetails.title;
-            thumbnail = info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url;
-        } else if (url.includes('instagram.com')) {
-            title = 'Instagram Post/Reel';
-            thumbnail = 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=800';
-        }
-
         res.json({ title, thumbnail, formats });
     } catch (err) {
-        console.error('YTDL Error:', err);
-        res.status(500).json({ message: 'Error fetching video info: ' + err.message });
+        console.error('SERVER ERROR (Info):', err.message);
+        console.error(err.stack);
+        res.status(500).json({
+            message: 'Error fetching video info',
+            error: err.message,
+            stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        });
     }
 });
 
